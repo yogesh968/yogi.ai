@@ -1,0 +1,17 @@
+:root { --bg: #0a0b10; --surface: #13151d; --border: rgba(255,255,255,.1); --text: #eceef4; --muted: #7d8498; --accent: #8b7cff; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; color: var(--text);
+  font: 15px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  background: radial-gradient(900px 500px at 80% -10%, rgba(109,93,252,.16), transparent 60%), var(--bg); }
+.box { width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 28px; text-align: center;
+  box-shadow: 0 30px 60px -30px rgba(0,0,0,.8); }
+.logo { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 14px; display: grid; place-items: center; background: linear-gradient(135deg, #8b7cff, #5b8cff); }
+.logo svg { width: 28px; height: 28px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; }
+h1 { margin: 0; font-size: 21px; } p { color: var(--muted); margin: 4px 0 20px; }
+input { width: 100%; padding: 12px 14px; border-radius: 11px; border: 1px solid var(--border); background: #0e1017; color: var(--text); font: inherit; outline: none; }
+input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(139,124,255,.2); }
+button { width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 11px; font: 600 15px inherit; color: #fff; cursor: pointer;
+  background: linear-gradient(180deg, #8b7cff, #6d5dfc); font-family: inherit; }
+button:disabled { opacity: .6; }
+.err { margin-top: 12px; color: #fecaca; background: rgba(248,113,113,.12); padding: 8px; border-radius: 9px; font-size: 14px; }
+[hidden] { display: none !important; }

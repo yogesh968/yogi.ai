@@ -1,6 +1,7 @@
 """All SQL lives here. Parameterized queries only."""
 from __future__ import annotations
 
+import socket
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,6 +9,10 @@ from psycopg.types.json import Jsonb
 
 from .config import get_settings
 from .db import pool
+
+# Jobs are tagged with the machine that holds the recording file, so a worker
+# on another machine sharing this database never grabs a job it cannot process.
+HOST = socket.gethostname()
 
 DEFAULT_STYLE_RULES = """\
 STYLE
@@ -48,12 +53,13 @@ async def update_app_settings(values: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------- calls
-async def create_call(*, direction: str, mode: str, contact_name: str, contact_phone: str, purpose: str, voice: str) -> int:
+async def create_call(*, direction: str, mode: str, contact_name: str, contact_phone: str, purpose: str, voice: str,
+                      provider_call_id: str = "") -> int:
     async with pool().connection() as conn:
         row = await (await conn.execute(
-            "INSERT INTO calls (direction, mode, contact_name, contact_phone, purpose, voice) "
-            "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-            (direction, mode, contact_name, contact_phone, purpose, voice),
+            "INSERT INTO calls (direction, mode, contact_name, contact_phone, purpose, voice, provider_call_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (direction, mode, contact_name, contact_phone, purpose, voice, provider_call_id),
         )).fetchone()
     assert row
     return int(row["id"])
@@ -69,7 +75,7 @@ async def finish_call(call_id: int, *, end_reason: str, recording_path: str | No
             (end_reason, recording_path, transcript_text, error, call_id),
         )
         await conn.execute(
-            "INSERT INTO jobs (kind, payload) VALUES ('process_call', %s)", (Jsonb({"call_id": call_id}),)
+            "INSERT INTO jobs (kind, payload) VALUES ('process_call', %s)", (Jsonb({"call_id": call_id, "host": HOST}),)
         )
 
 
@@ -138,15 +144,18 @@ async def delete_call(call_id: int) -> str | None:
     return row["recording_path"] if row else None
 
 
-async def recent_summaries(contact_name: str, limit: int = 3, exclude_id: int | None = None) -> list[dict[str, Any]]:
-    if not contact_name.strip():
+async def recent_summaries(contact_name: str, contact_phone: str = "", limit: int = 3,
+                           exclude_id: int | None = None) -> list[dict[str, Any]]:
+    """Last calls with this person, matched by phone number or (case-insensitive) name."""
+    name, phone = contact_name.strip(), contact_phone.strip()
+    if not name and not phone:
         return []
     async with pool().connection() as conn:
         return await (await conn.execute(
             "SELECT id, started_at, direction, title, summary FROM calls "
-            "WHERE lower(contact_name)=lower(%s) AND summary <> '' AND id <> %s "
-            "ORDER BY started_at DESC LIMIT %s",
-            (contact_name.strip(), exclude_id or -1, limit),
+            "WHERE ((%s <> '' AND contact_phone = %s) OR (%s <> '' AND lower(contact_name) = lower(%s))) "
+            "AND summary <> '' AND id <> %s ORDER BY started_at DESC LIMIT %s",
+            (phone, phone, name, name, exclude_id or -1, limit),
         )).fetchall()
 
 
@@ -184,7 +193,8 @@ async def save_analysis(
     analysis: dict[str, Any],
     corrected: list[CorrectedSegment],
     action_items: list[dict[str, str]],
-    facts: list[tuple[str, str]],
+    facts: list[tuple[str, str, str]],
+    caller_name: str = "",
 ) -> None:
     transcript_text = "\n".join(f"{c.speaker.capitalize()}: {c.text}" for c in corrected)
     async with pool().connection() as conn, conn.transaction():
@@ -205,34 +215,50 @@ async def save_analysis(
                 "INSERT INTO action_items (call_id, owner, task, due) VALUES (%s,%s,%s,%s)",
                 (call_id, a.get("owner", ""), a["task"], a.get("due", "")),
             )
-        for fact, contact in facts:
+        for fact, contact, phone in facts:
             await conn.execute(
-                "INSERT INTO memory_facts (fact, contact_name, source_call_id) VALUES (%s,%s,%s) "
-                "ON CONFLICT (lower(contact_name), lower(fact)) DO NOTHING",
-                (fact, contact, call_id),
+                "INSERT INTO memory_facts (fact, contact_name, contact_phone, source_call_id) VALUES (%s,%s,%s,%s) "
+                "ON CONFLICT (lower(contact_name), contact_phone, lower(fact)) DO NOTHING",
+                (fact, contact, phone, call_id),
             )
+        if caller_name:
+            # Unknown caller said their name: remember it for next time (never overrides a name you set).
+            row = await (await conn.execute(
+                "SELECT contact_phone, contact_name FROM calls WHERE id=%s", (call_id,))).fetchone()
+            if row and row["contact_phone"] and not row["contact_name"]:
+                await conn.execute(
+                    "INSERT INTO contacts (phone, name, source) VALUES (%s,%s,'auto') ON CONFLICT (phone) DO NOTHING",
+                    (row["contact_phone"], caller_name[:200]),
+                )
+                await conn.execute("UPDATE calls SET contact_name=%s WHERE id=%s", (caller_name[:200], call_id))
 
 
 # ---------------------------------------------------------------- memory
-async def list_facts(contact_name: str | None = None) -> list[dict[str, Any]]:
+async def list_facts(contact_name: str | None = None, contact_phone: str = "") -> list[dict[str, Any]]:
+    """All facts (contact_name=None), or the facts relevant to one call: general + about this person."""
     async with pool().connection() as conn:
         if contact_name is None:
             return await (await conn.execute(
-                "SELECT id, fact, contact_name, source_call_id, created_at FROM memory_facts ORDER BY created_at DESC"
+                "SELECT id, fact, contact_name, contact_phone, source_call_id, created_at FROM memory_facts "
+                "ORDER BY created_at DESC"
             )).fetchall()
+        name, phone = contact_name.strip(), contact_phone.strip()
         return await (await conn.execute(
-            "SELECT id, fact, contact_name FROM memory_facts WHERE contact_name='' OR lower(contact_name)=lower(%s) "
-            "ORDER BY (contact_name='') , created_at DESC LIMIT 80",
-            (contact_name,),
+            "SELECT id, fact, contact_name, contact_phone FROM memory_facts "
+            "WHERE (contact_name = '' AND contact_phone = '') "
+            "   OR (%s <> '' AND lower(contact_name) = lower(%s)) OR (%s <> '' AND contact_phone = %s) "
+            "ORDER BY (contact_name = '' AND contact_phone = ''), created_at DESC LIMIT 80",
+            (name, name, phone, phone),
         )).fetchall()
 
 
-async def add_fact(fact: str, contact_name: str = "") -> dict[str, Any] | None:
+async def add_fact(fact: str, contact_name: str = "", contact_phone: str = "") -> dict[str, Any] | None:
     async with pool().connection() as conn:
         return await (await conn.execute(
-            "INSERT INTO memory_facts (fact, contact_name) VALUES (%s,%s) "
-            "ON CONFLICT (lower(contact_name), lower(fact)) DO NOTHING RETURNING id, fact, contact_name, created_at",
-            (fact, contact_name),
+            "INSERT INTO memory_facts (fact, contact_name, contact_phone) VALUES (%s,%s,%s) "
+            "ON CONFLICT (lower(contact_name), contact_phone, lower(fact)) DO NOTHING "
+            "RETURNING id, fact, contact_name, contact_phone, created_at",
+            (fact, contact_name, contact_phone),
         )).fetchone()
 
 
@@ -302,12 +328,14 @@ async def claim_job() -> dict[str, Any] | None:
             UPDATE jobs SET status='running', attempts=attempts+1, locked_at=now(), updated_at=now()
             WHERE id = (
                 SELECT id FROM jobs
-                WHERE (status='pending' AND run_after <= now())
-                   OR (status='running' AND locked_at < now() - interval '15 minutes')
+                WHERE ((status='pending' AND run_after <= now())
+                       OR (status='running' AND locked_at < now() - interval '15 minutes'))
+                  AND coalesce(payload->>'host', %s) = %s
                 ORDER BY run_after FOR UPDATE SKIP LOCKED LIMIT 1
             )
             RETURNING id, kind, payload, attempts, max_attempts
-            """
+            """,
+            (HOST, HOST),
         )).fetchone()
 
 
@@ -328,4 +356,45 @@ async def fail_job(job_id: int, error: str, retry: bool, backoff_s: int) -> None
 async def requeue_call(call_id: int) -> None:
     async with pool().connection() as conn, conn.transaction():
         await conn.execute("UPDATE calls SET status='queued', error='' WHERE id=%s", (call_id,))
-        await conn.execute("INSERT INTO jobs (kind, payload) VALUES ('process_call', %s)", (Jsonb({"call_id": call_id}),))
+        await conn.execute("INSERT INTO jobs (kind, payload) VALUES ('process_call', %s)",
+                           (Jsonb({"call_id": call_id, "host": HOST}),))
+
+
+# ---------------------------------------------------------------- contacts
+async def contact_name_for(phone: str) -> str:
+    if not phone:
+        return ""
+    async with pool().connection() as conn:
+        row = await (await conn.execute("SELECT name FROM contacts WHERE phone=%s", (phone,))).fetchone()
+    return row["name"] if row else ""
+
+
+async def list_contacts() -> list[dict[str, Any]]:
+    async with pool().connection() as conn:
+        return await (await conn.execute(
+            "SELECT c.phone, c.name, c.source, c.updated_at, "
+            "(SELECT count(*) FROM calls WHERE contact_phone=c.phone) AS calls "
+            "FROM contacts c ORDER BY lower(c.name)"
+        )).fetchall()
+
+
+async def upsert_contact(phone: str, name: str) -> None:
+    """Manual save: also relabels past calls from this number."""
+    async with pool().connection() as conn, conn.transaction():
+        await conn.execute(
+            "INSERT INTO contacts (phone, name, source) VALUES (%s,%s,'manual') "
+            "ON CONFLICT (phone) DO UPDATE SET name=EXCLUDED.name, source='manual', updated_at=now()",
+            (phone, name),
+        )
+        await conn.execute("UPDATE calls SET contact_name=%s WHERE contact_phone=%s", (name, phone))
+
+
+async def delete_contact(phone: str) -> bool:
+    async with pool().connection() as conn:
+        cur = await conn.execute("DELETE FROM contacts WHERE phone=%s", (phone,))
+        return cur.rowcount > 0
+
+
+async def set_hangup_cause(provider_call_id: str, cause: str) -> None:
+    async with pool().connection() as conn:
+        await conn.execute("UPDATE calls SET hangup_cause=%s WHERE provider_call_id=%s", (cause[:200], provider_call_id))

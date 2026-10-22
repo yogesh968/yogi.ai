@@ -45,7 +45,7 @@ class NativeAudioRenderer(SpeechRenderer):
 
     def __init__(self, device_rate: int, sink: PcmSink) -> None:
         super().__init__(device_rate, sink)
-        self._rs = StreamResampler(GEMINI_OUTPUT_RATE, device_rate, quality="MQ")
+        self._rs = StreamResampler(GEMINI_OUTPUT_RATE, device_rate, quality="LQ")
 
     def on_model_audio(self, pcm: bytes) -> None:
         x = np.frombuffer(pcm, dtype="<i2")
@@ -54,4 +54,4 @@ class NativeAudioRenderer(SpeechRenderer):
 
     def interrupt(self) -> None:
         # Fresh resampler so no tail of the interrupted sentence leaks into the next one.
-        self._rs = StreamResampler(GEMINI_OUTPUT_RATE, self.device_rate, quality="MQ")
+        self._rs = StreamResampler(GEMINI_OUTPUT_RATE, self.device_rate, quality="LQ")

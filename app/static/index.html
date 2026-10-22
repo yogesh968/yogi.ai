@@ -25,6 +25,7 @@
       <div class="model-chip" id="modelChip">—</div>
       <div class="ws-dot" id="wsDot" title="Dashboard connection"></div>
     </div>
+    <button class="btn sm ghost" id="logoutBtn" hidden>Log out</button>
   </aside>
 
   <main>
@@ -42,28 +43,38 @@
     <section class="tab active" id="tab-live">
       <div class="live-grid">
         <div class="col">
-          <div class="card">
-            <div class="card-title">Session</div>
-            <label class="lbl">Audio route</label>
-            <div class="seg" id="modeSeg">
-              <button data-v="phone" class="on">Phone call</button>
-              <button data-v="test">Test (mic + headphones)</button>
-            </div>
-            <label class="lbl">Direction</label>
-            <div class="seg" id="dirSeg">
-              <button data-v="incoming" class="on">Incoming</button>
-              <button data-v="outgoing">Outgoing</button>
-            </div>
+          <div class="card" id="activeCard">
+            <div class="card-title">Active calls <span class="muted" id="activeCount"></span></div>
+            <div id="activeList" class="active-list"><div class="ready"><i></i><div><strong id="readyTitle">Ready for calls</strong><small id="readySub">Calls forwarded from your phone are answered automatically.</small></div></div></div>
+            <button class="btn danger big" id="stopBtn" hidden><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>Hang up this call</span></button>
+          </div>
+
+          <div class="card" id="outboundCard" hidden>
+            <div class="card-title">Have the assistant call someone</div>
             <div class="row2">
-              <div><label class="lbl" for="contactName">Contact name</label><input id="contactName" maxlength="200" placeholder="e.g. Ravi Sharma" autocomplete="off"></div>
-              <div><label class="lbl" for="contactPhone">Phone (optional)</label><input id="contactPhone" maxlength="32" placeholder="+91…" autocomplete="off"></div>
+              <div><label class="lbl" for="outPhone">Phone number</label><input id="outPhone" maxlength="32" placeholder="+91 98765 43210" autocomplete="off" inputmode="tel"></div>
+              <div><label class="lbl" for="outName">Name (optional)</label><input id="outName" maxlength="200" placeholder="Ravi" autocomplete="off"></div>
             </div>
+            <label class="lbl" for="outPurpose">What should it do on the call?</label>
+            <textarea id="outPurpose" rows="3" maxlength="1000" placeholder="e.g. Confirm the Saturday 5 pm meeting and ask if they need parking"></textarea>
+            <button class="btn primary big" id="dialBtn"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg><span>Call now</span></button>
+            <p class="hint" style="margin:10px 0 0">The other person sees your assistant's number <span id="vobizNumber"></span>, not your mobile number.</p>
+          </div>
+
+          <div class="card" id="testCard" hidden>
+            <div class="card-title">Practice call (this computer's mic)</div>
+            <p class="hint">Free. Wear headphones so the assistant doesn't hear itself.</p>
+            <div class="seg" id="dirSeg">
+              <button data-v="incoming" class="on">As incoming</button>
+              <button data-v="outgoing">As outgoing</button>
+            </div>
+            <label class="lbl" for="testName">Pretend caller name</label>
+            <input id="testName" maxlength="200" placeholder="e.g. Ravi" autocomplete="off">
             <div id="purposeWrap" hidden>
-              <label class="lbl" for="purpose">Call purpose</label>
-              <textarea id="purpose" rows="3" maxlength="1000" placeholder="What should the assistant accomplish on this call?"></textarea>
+              <label class="lbl" for="testPurpose">Call purpose</label>
+              <textarea id="testPurpose" rows="2" maxlength="1000"></textarea>
             </div>
-            <button class="btn primary big" id="startBtn"><svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></svg><span>Start AI on this call</span></button>
-            <button class="btn danger big" id="stopBtn" hidden><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>Stop &amp; save</span></button>
+            <button class="btn big" id="testBtn"><svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg><span>Start practice call</span></button>
           </div>
 
           <div class="card">
@@ -84,7 +95,7 @@
           <div class="transcript" id="liveTranscript">
             <div class="empty">
               <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg>
-              <p>Start a session to see the conversation here in real time.</p>
+              <p>When a call comes in, the conversation appears here in real time.</p>
             </div>
           </div>
         </div>
@@ -116,7 +127,19 @@
           <button class="btn primary" type="submit">Add</button>
         </form>
       </div>
-      <div class="card"><div class="card-title">Known facts <span class="muted" id="factCount"></span></div><div id="factList" class="fact-list"></div></div>
+      <div class="mem-grid">
+        <div class="card"><div class="card-title">Known facts <span class="muted" id="factCount"></span></div><div id="factList" class="fact-list"></div></div>
+        <div class="card">
+          <div class="card-title">Contacts <span class="muted" id="contactCount"></span></div>
+          <p class="hint">Names for phone numbers, so the assistant greets callers by name and remembers them. Callers who say their name are added automatically.</p>
+          <form id="contactForm" class="contact-form">
+            <input id="cPhone" maxlength="32" placeholder="+91 98765 43210" required inputmode="tel">
+            <input id="cName" maxlength="200" placeholder="Name" required>
+            <button class="btn primary" type="submit">Save</button>
+          </form>
+          <div id="contactList" class="fact-list"></div>
+        </div>
+      </div>
     </section>
 
     <!-- ANALYTICS -->
@@ -149,9 +172,8 @@
             <button class="btn primary" id="saveSettings">Save settings</button>
           </div>
           <div class="card">
-            <div class="card-title">Audio devices</div>
-            <div id="devices" class="devices"></div>
-            <p class="hint">Device names come from <code>.env</code>. Run <code>python -m app.devices</code> to list all.</p>
+            <div class="card-title">Phone line</div>
+            <div id="telephony" class="devices"></div>
           </div>
         </div>
       </div>

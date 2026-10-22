@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except (ImportError, OSError):  # headless server: no PortAudio
+    sd = None  # type: ignore[assignment]
 
 
 class AudioDeviceError(RuntimeError):
@@ -24,6 +27,8 @@ def _hostapi_name(i: int) -> str:
 
 
 def list_devices(kind: str) -> list[Device]:
+    if sd is None:
+        return []
     key = "max_input_channels" if kind == "input" else "max_output_channels"
     out: list[Device] = []
     for i, d in enumerate(sd.query_devices()):
@@ -45,6 +50,8 @@ def find_device(kind: str, name_substring: str, preferred_hostapi: str) -> Devic
     def rank(d: Device) -> int:
         return order.index(d.hostapi) if d.hostapi in order else len(order)
 
+    if sd is None:
+        raise AudioDeviceError("No audio devices on this machine (PortAudio not available).")
     if not name_substring.strip():
         default_idx = sd.default.device[0 if kind == "input" else 1]
         if default_idx is None or default_idx < 0:
@@ -81,8 +88,6 @@ def main() -> None:
     if s:
         print("\n== Resolved from .env ==")
         for label, kind, sub in [
-            ("caller input (phone)", "input", s.caller_input_device),
-            ("AI output (phone)", "output", s.ai_output_device),
             ("test input", "input", s.test_input_device),
             ("test output", "output", s.test_output_device),
         ]:

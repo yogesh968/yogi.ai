@@ -252,3 +252,23 @@ audio { width: 100%; margin: 4px 0 16px; height: 40px; border-radius: 10px; }
   .tiles { grid-template-columns: repeat(2, 1fr); }
   .fact-form { grid-template-columns: 1fr; }
 }
+
+/* ---- cloud phone additions ---- */
+.active-list { display: flex; flex-direction: column; gap: 6px; }
+.ready { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 12px; background: var(--bg-2); border: 1px solid var(--border); }
+.ready i { width: 10px; height: 10px; border-radius: 50%; background: var(--good); box-shadow: 0 0 12px var(--good); flex: none; }
+.ready.off i { background: var(--muted); box-shadow: none; }
+.ready small { display: block; color: var(--muted); font-size: 12px; }
+.call-chip { display: grid; grid-template-columns: 32px 1fr auto; gap: 10px; align-items: center; text-align: left; padding: 10px 12px; border-radius: 12px;
+  background: var(--bg-2); border: 1px solid var(--border); transition: border-color .15s; }
+.call-chip.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.call-chip strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-chip small { color: var(--muted); font-size: 12px; }
+.call-chip .t { font: 500 13px var(--mono); color: var(--text-2); }
+.mem-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+.contact-form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 12px; }
+.fact .ph { font: 12px var(--mono); color: var(--muted); }
+#logoutBtn { margin: -8px 8px 0; }
+.url-box { font: 12px var(--mono); word-break: break-all; color: var(--text); background: var(--surface-3); padding: 6px 8px; border-radius: 6px; margin-top: 4px; cursor: copy; }
+.ok { color: var(--good); }
+@media (max-width: 1000px) { .mem-grid, .contact-form { grid-template-columns: 1fr; } #logoutBtn { margin: 0; } }

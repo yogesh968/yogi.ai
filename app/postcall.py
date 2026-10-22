@@ -40,6 +40,7 @@ class MemoryFact(BaseModel):
 
 
 class CallAnalysis(BaseModel):
+    caller_name: str = Field("", description="The caller's/other party's name ONLY if they clearly said it, else empty.")
     title: str = Field(description="Short title, max 8 words.")
     summary: str = Field(description="2-4 sentence factual summary.")
     key_points: list[str]
@@ -55,7 +56,7 @@ class CallAnalysis(BaseModel):
 
 def analysis_prompt(call: dict, live_transcript: str, owner: str, has_audio: bool) -> str:
     return f"""You are analysing a phone call handled by {owner}'s AI phone assistant.
-Call direction: {call['direction']}. Contact: {call['contact_name'] or 'unknown'}. Purpose given: {call['purpose'] or '-'}.
+Call direction: {call['direction']}. Contact: {call['contact_name'] or 'unknown'} {call.get('contact_phone') or ''}. Purpose given: {call['purpose'] or '-'}.
 {"The attached audio is STEREO: LEFT channel = the caller, RIGHT channel = the AI assistant." if has_audio else "No audio is available; use the live transcript only."}
 
 Rules:
@@ -74,14 +75,15 @@ Live transcript (machine-generated during the call):
 """
 
 
-def _fact_owner(about: str, contact: str) -> str:
-    """Map the model's 'about' to the exact contact name used for lookups, so facts are found on the next call."""
-    about, contact = (about or "").strip(), (contact or "").strip()
+def _fact_target(about: str, contact: str, phone: str, caller_name: str) -> tuple[str, str]:
+    """Map the model's 'about' to (contact_name, contact_phone) used for lookups, so the fact is found next call."""
+    about = (about or "").strip()
     if not about:
-        return ""
-    if contact and (about.lower() in contact.lower() or contact.lower() in about.lower()):
-        return contact
-    return about[:200]
+        return "", ""  # general fact about the owner
+    for n in (contact.strip(), caller_name.strip()):
+        if n and (about.lower() in n.lower() or n.lower() in about.lower()):
+            return contact.strip() or caller_name.strip(), phone
+    return about[:200], ""
 
 
 async def _wait_active(client: genai.Client, f: types.File, timeout_s: float = 120) -> types.File:
@@ -144,7 +146,9 @@ async def process_call(call_id: int) -> None:
             analysis=a.model_dump(exclude={"transcript"}),
             corrected=[repo.CorrectedSegment(u.speaker, u.text.strip()) for u in a.transcript if u.text.strip()],
             action_items=[i.model_dump() for i in a.action_items if i.task.strip()],
-            facts=[(f.fact.strip()[:1000], _fact_owner(f.about, contact)) for f in a.memory_facts[:5] if f.fact.strip()],
+            facts=[(f.fact.strip()[:1000], *_fact_target(f.about, contact, call["contact_phone"], a.caller_name))
+                   for f in a.memory_facts[:5] if f.fact.strip()],
+            caller_name=a.caller_name.strip(),
         )
         log.info("call %s analysed: %s", call_id, a.title)
     finally:

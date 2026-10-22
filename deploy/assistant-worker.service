@@ -1,0 +1,22 @@
+[Unit]
+Description=Call Assistant - background worker (summaries)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=assistant
+WorkingDirectory=/opt/assistant
+ExecStart=/opt/assistant/.venv/bin/python -m app.worker
+Restart=always
+RestartSec=3
+# Give live calls time to save on restart/shutdown
+TimeoutStopSec=30
+KillSignal=SIGINT
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/assistant/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

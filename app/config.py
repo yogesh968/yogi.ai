@@ -4,8 +4,9 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,10 +28,21 @@ class Settings(BaseSettings):
     live_model: str = "gemini-3.8-live"
     postcall_model: str = "gemini-3.8-flash"
 
-    # --- audio: phone mode (virtual cables). Substring match, case-insensitive. ---
-    caller_input_device: str = "CABLE Output"      # Phone Link speaker -> CABLE Input -> we read CABLE Output
-    ai_output_device: str = "Hi-Fi Cable Input"    # we play here -> Phone Link mic = Hi-Fi Cable Output
-    # --- audio: test mode (your normal mic + headphones). Empty = Windows default device. ---
+    # --- phone calls via Vobiz (cloud telephony; calls forwarded from your mobile) ---
+    owner_phone: str = ""                 # your mobile, E.164 (+91...): used to recognise forwarded calls
+    vobiz_auth_id: str = ""
+    vobiz_auth_token: str = ""
+    vobiz_number: str = ""                # the Vobiz number you rented, E.164
+    vobiz_webhook_secret: str = ""        # random string; part of the webhook URLs Vobiz calls
+    vobiz_api_base: str = "https://api.vobiz.ai/api/v1"
+    max_concurrent_calls: int = Field(2, ge=1, le=10)
+
+    # --- public deployment (empty = local only) ---
+    public_base_url: str = ""             # e.g. https://yogi-assistant.duckdns.org
+    dashboard_password: str = ""
+    secret_key: str = ""                  # random, signs login cookies
+
+    # --- local test mode (your laptop mic + headphones). Empty = system default device. ---
     test_input_device: str = ""
     test_output_device: str = ""
     # Preferred Windows host API. WASAPI has the lowest latency; MME truncates names to 31 chars.
@@ -58,8 +70,29 @@ class Settings(BaseSettings):
     @classmethod
     def _loopback_only(cls, v: str) -> str:
         if v not in ("127.0.0.1", "localhost", "::1"):
-            raise ValueError("HOST must be a loopback address (127.0.0.1); this app is local-only by design")
+            raise ValueError("HOST must be a loopback address (127.0.0.1); in the cloud, Caddy serves the public side")
         return v
+
+    @property
+    def public_host(self) -> str:
+        return urlparse(self.public_base_url).hostname or ""
+
+    @property
+    def vobiz_enabled(self) -> bool:
+        return bool(self.vobiz_auth_id and self.vobiz_auth_token and self.vobiz_number and self.public_base_url)
+
+    @model_validator(mode="after")
+    def _public_needs_auth(self) -> "Settings":
+        if self.public_base_url:
+            if not self.public_base_url.startswith("https://"):
+                raise ValueError("PUBLIC_BASE_URL must start with https://")
+            if len(self.dashboard_password) < 10:
+                raise ValueError("DASHBOARD_PASSWORD (min 10 chars) is required when PUBLIC_BASE_URL is set")
+            if len(self.secret_key) < 32:
+                raise ValueError("SECRET_KEY (min 32 chars) is required when PUBLIC_BASE_URL is set")
+            if self.vobiz_auth_id and len(self.vobiz_webhook_secret) < 16:
+                raise ValueError("VOBIZ_WEBHOOK_SECRET (min 16 chars) is required for Vobiz")
+        return self
 
     @field_validator("recordings_dir")
     @classmethod

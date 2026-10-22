@@ -13,6 +13,8 @@ class CallContext:
     contact_name: str
     purpose: str
     recording_enabled: bool
+    contact_phone: str = ""
+    can_hang_up: bool = False
 
 
 def build_system_prompt(
@@ -27,7 +29,7 @@ def build_system_prompt(
     now: datetime | None = None,
 ) -> str:
     now = now or datetime.now(ZoneInfo(timezone))
-    who = ctx.contact_name.strip() or "an unknown caller"
+    who = ctx.contact_name.strip() or (f"an unknown caller ({ctx.contact_phone})" if ctx.contact_phone else "an unknown caller")
     disclosure = (
         f"Hi, this is {owner_name}'s AI assistant"
         + (", and this call is being recorded" if ctx.recording_enabled else "")
@@ -56,6 +58,11 @@ def build_system_prompt(
         f"- {r['started_at']:%d %b %Y} ({r['direction']}): {r['title'] or ''} — {r['summary'][:500]}" for r in recent
     ) or "- (no earlier calls with this contact)"
 
+    hangup = (
+        "- When the conversation is clearly finished and you have said goodbye, call the end_call tool to hang up.\n"
+        "  Also hang up politely on obvious spam/robocalls after one short sentence.\n"
+        if ctx.can_hang_up else ""
+    )
     return f"""You are {owner_name}'s personal AI phone assistant, speaking live on a real phone call.
 Current date/time: {now:%A %d %B %Y, %I:%M %p} ({timezone}).
 
@@ -78,7 +85,8 @@ Current date/time: {now:%A %d %B %Y, %I:%M %p} ({timezone}).
 - No lists, markdown, emojis or reading out URLs. Say numbers naturally.
 - If audio is unclear, briefly ask them to repeat. If they're silent for a while, check "Hello, are you still there?"
 - Before ending: repeat back any message, callback number or commitment for confirmation, then say a friendly goodbye.
-
+- If the caller's name is unknown, ask for it early ("May I know who's calling?").
+{hangup}
 == OWNER'S STYLE & RULES (written by {owner_name}) ==
 {style_rules.strip()}
 

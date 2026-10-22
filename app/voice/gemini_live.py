@@ -36,6 +36,16 @@ class LiveHandlers:
     on_turn_complete: Callable[[], None]
     on_status: Callable[[str, str], None]          # (state, message)
     transcript_so_far: Callable[[], str]
+    on_end_call: Callable[[str], None] | None = None  # model decided the conversation is over
+
+
+END_CALL_TOOL = types.Tool(function_declarations=[types.FunctionDeclaration(
+    name="end_call",
+    description=("Hang up the phone call. Call this ONLY after you have said a clear goodbye and the caller has "
+                 "nothing more to add, or if the caller asks you to end the call."),
+    parameters_json_schema={"type": "object", "properties": {
+        "reason": {"type": "string", "description": "Short reason, e.g. 'conversation finished'."}}},
+)])
 
 
 _SENS_START = {"high": types.StartSensitivity.START_SENSITIVITY_HIGH, "low": types.StartSensitivity.START_SENSITIVITY_LOW}
@@ -101,6 +111,7 @@ class GeminiLiveBrain:
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             session_resumption=types.SessionResumptionConfig(handle=self.handle),
+            tools=[END_CALL_TOOL] if self.h.on_end_call else None,
             context_window_compression=types.ContextWindowCompressionConfig(sliding_window=types.SlidingWindow()),
             realtime_input_config=types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
@@ -182,6 +193,21 @@ class GeminiLiveBrain:
             chunk = await audio_in.get()
             await session.send_realtime_input(audio=types.Blob(data=chunk, mime_type=INPUT_MIME))
 
+    async def _handle_tools(self, session: genai.live.AsyncSession, calls: list[types.FunctionCall]) -> None:
+        responses = []
+        for fc in calls:
+            if fc.name == "end_call" and self.h.on_end_call:
+                self.h.on_end_call(str((fc.args or {}).get("reason", "")))
+                result = {"ok": True}
+            else:
+                result = {"error": f"unknown function {fc.name}"}
+            responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=result,
+                                                    scheduling=types.FunctionResponseScheduling.SILENT))
+        try:
+            await session.send_tool_response(function_responses=responses)
+        except Exception as e:  # the session may already be closing because we're hanging up
+            log.debug("tool response not sent: %s", e)
+
     async def _recv_loop(self, session: genai.live.AsyncSession, rotate: asyncio.Event) -> None:
         go_away_deadline: float | None = None
         while True:
@@ -198,6 +224,9 @@ class GeminiLiveBrain:
                     log.info("GoAway received, %.1fs left", left)
                     go_away_deadline = time.monotonic() + max(0.0, left - 2.0)
                     asyncio.get_running_loop().call_later(max(0.0, left - 2.0), rotate.set)
+
+                if msg.tool_call and msg.tool_call.function_calls:
+                    await self._handle_tools(session, msg.tool_call.function_calls)
 
                 sc = msg.server_content
                 if sc is None:

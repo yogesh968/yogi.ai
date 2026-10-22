@@ -1,6 +1,6 @@
 """Terminal test mode: talk to the assistant with your normal mic + headphones.
 
-    python -m app.cli talk                       # incoming call simulation
+    python -m app.cli talk                       # practice "incoming call" on this computer
     python -m app.cli talk --direction outgoing --name "Ravi" --purpose "Confirm Saturday meeting at 5"
     python -m app.cli check                      # verify .env, DB, devices and Gemini key
 
@@ -49,13 +49,20 @@ async def talk(args: argparse.Namespace) -> None:
     await migrate()
     bus.bind_loop(asyncio.get_running_loop())
     printer = asyncio.create_task(_printer())
-    agent = CallAgent(CallOptions(mode=args.mode, direction=args.direction, contact_name=args.name,
-                                  contact_phone=args.phone, purpose=args.purpose))
+    from .transports.local import LocalAudioTransport
+    try:
+        transport = LocalAudioTransport(get_settings())
+    except AudioDeviceError as e:
+        print(f"{C['red']}{e}{C['end']}")
+        await db.close_pool()
+        return
+    agent = CallAgent(CallOptions(mode="test", direction=args.direction, contact_name=args.name,
+                                  contact_phone=args.phone, purpose=args.purpose), transport)
     try:
         signal.signal(signal.SIGINT, lambda *_: agent.request_stop("user"))
     except ValueError:
         pass
-    print(f"{C['dim']}Starting {args.mode} call… speak after the assistant greets you. Ctrl+C to hang up.{C['end']}")
+    print(f"{C['dim']}Starting practice call… speak after the assistant greets you. Ctrl+C to hang up.{C['end']}")
     try:
         call_id = await agent.run()
         print(f"\nSaved as call #{call_id}. The worker will summarize it (python -m app.worker).")
@@ -94,7 +101,6 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="python -m app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
     t = sub.add_parser("talk", help="start a call from the terminal")
-    t.add_argument("--mode", choices=["test", "phone"], default="test")
     t.add_argument("--direction", choices=["incoming", "outgoing"], default="incoming")
     t.add_argument("--name", default="")
     t.add_argument("--phone", default="")

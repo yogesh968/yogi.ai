@@ -8,7 +8,8 @@ import soxr
 class StreamResampler:
     """Stateful resampler for continuous chunked audio (no clicks at chunk boundaries)."""
 
-    def __init__(self, in_rate: int, out_rate: int, quality: str = "HQ") -> None:
+    def __init__(self, in_rate: int, out_rate: int, quality: str = "LQ") -> None:
+        # LQ = 4-24 ms streaming delay (MQ adds up to ~90 ms); plenty for phone-band speech.
         self.in_rate, self.out_rate = in_rate, out_rate
         self._passthrough = in_rate == out_rate
         self._rs = None if self._passthrough else soxr.ResampleStream(in_rate, out_rate, 1, dtype="float32", quality=quality)

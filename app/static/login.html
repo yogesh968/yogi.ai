@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Call Assistant</title>
+  <link rel="stylesheet" href="/static/login.css">
+</head>
+<body>
+  <form class="box" id="f">
+    <div class="logo"><svg viewBox="0 0 24 24"><path d="M5 12h1.5M9 8v8M13 6v12M17 9.5v5M20 12h.5"/></svg></div>
+    <h1>Call Assistant</h1>
+    <p>Enter your dashboard password.</p>
+    <input type="password" id="pw" autocomplete="current-password" placeholder="Password" required autofocus maxlength="200">
+    <button type="submit" id="btn">Sign in</button>
+    <div class="err" id="err" hidden></div>
+  </form>
+  <script src="/static/login.js"></script>
+</body>
+</html>
