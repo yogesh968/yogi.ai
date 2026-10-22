@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Call Assistant</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%237c6cff'/%3E%3Cpath d='M10 16h2m3-4v8m3-6v4m3-2h1' stroke='white' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 24 24"><path d="M5 12h1.5M9 8v8M13 6v12M17 9.5v5M20 12h.5"/></svg></div>
+      <div><div class="brand-name">Call Assistant</div><div class="brand-sub" id="ownerLabel">Personal AI</div></div>
+    </div>
+    <nav>
+      <button class="nav active" data-tab="live"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>Live</button>
+      <button class="nav" data-tab="history"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 3"/></svg>History</button>
+      <button class="nav" data-tab="memory"><svg viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3Z"/><path d="M5 17a3 3 0 0 1 3-3h11M9 8h6"/></svg>Memory</button>
+      <button class="nav" data-tab="analytics"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Analytics</button>
+      <button class="nav" data-tab="settings"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>Settings</button>
+    </nav>
+    <div class="side-foot">
+      <div class="model-chip" id="modelChip">—</div>
+      <div class="ws-dot" id="wsDot" title="Dashboard connection"></div>
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <h1 id="pageTitle">Live</h1>
+      <div class="top-right">
+        <span class="timer" id="timer" hidden>00:00</span>
+        <span class="badge" id="statusBadge" data-state="idle"><i></i><span>Idle</span></span>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <!-- LIVE -->
+    <section class="tab active" id="tab-live">
+      <div class="live-grid">
+        <div class="col">
+          <div class="card">
+            <div class="card-title">Session</div>
+            <label class="lbl">Audio route</label>
+            <div class="seg" id="modeSeg">
+              <button data-v="phone" class="on">Phone call</button>
+              <button data-v="test">Test (mic + headphones)</button>
+            </div>
+            <label class="lbl">Direction</label>
+            <div class="seg" id="dirSeg">
+              <button data-v="incoming" class="on">Incoming</button>
+              <button data-v="outgoing">Outgoing</button>
+            </div>
+            <div class="row2">
+              <div><label class="lbl" for="contactName">Contact name</label><input id="contactName" maxlength="200" placeholder="e.g. Ravi Sharma" autocomplete="off"></div>
+              <div><label class="lbl" for="contactPhone">Phone (optional)</label><input id="contactPhone" maxlength="32" placeholder="+91…" autocomplete="off"></div>
+            </div>
+            <div id="purposeWrap" hidden>
+              <label class="lbl" for="purpose">Call purpose</label>
+              <textarea id="purpose" rows="3" maxlength="1000" placeholder="What should the assistant accomplish on this call?"></textarea>
+            </div>
+            <button class="btn primary big" id="startBtn"><svg viewBox="0 0 24 24"><path d="M7 4v16l13-8z"/></svg><span>Start AI on this call</span></button>
+            <button class="btn danger big" id="stopBtn" hidden><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span>Stop &amp; save</span></button>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Signal</div>
+            <div class="meter"><span>Caller</span><div class="bar"><b id="mCaller"></b></div></div>
+            <div class="meter"><span>Assistant</span><div class="bar ai"><b id="mAi"></b></div></div>
+            <div class="stats-inline">
+              <div><small>Response latency</small><strong id="latency">—</strong></div>
+              <div><small>Playback buffer</small><strong id="bufferMs">—</strong></div>
+              <div><small>Interruptions</small><strong id="interrupts">0</strong></div>
+            </div>
+            <div class="devline" id="devLine"></div>
+          </div>
+        </div>
+
+        <div class="card transcript-card">
+          <div class="card-title">Live transcript <span class="muted" id="liveCallId"></span></div>
+          <div class="transcript" id="liveTranscript">
+            <div class="empty">
+              <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg>
+              <p>Start a session to see the conversation here in real time.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="tab" id="tab-history">
+      <div class="hist-grid">
+        <div class="card list-card">
+          <div class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="search" placeholder="Search calls, people, topics…" maxlength="200" autocomplete="off"></div>
+          <div id="callList" class="call-list"></div>
+        </div>
+        <div class="card detail-card" id="callDetail">
+          <div class="empty"><p>Select a call to see its summary, recording and transcript.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MEMORY -->
+    <section class="tab" id="tab-memory">
+      <div class="card">
+        <div class="card-title">Add a fact</div>
+        <p class="hint">Facts are given to the assistant on every call. New ones are added automatically after each call.</p>
+        <form id="factForm" class="fact-form">
+          <input id="factText" maxlength="1000" placeholder="e.g. I'm usually in meetings until 2 pm on Mondays" required>
+          <input id="factContact" maxlength="200" placeholder="About contact (optional)">
+          <button class="btn primary" type="submit">Add</button>
+        </form>
+      </div>
+      <div class="card"><div class="card-title">Known facts <span class="muted" id="factCount"></span></div><div id="factList" class="fact-list"></div></div>
+    </section>
+
+    <!-- ANALYTICS -->
+    <section class="tab" id="tab-analytics">
+      <div class="tiles" id="tiles"></div>
+      <div class="an-grid">
+        <div class="card"><div class="card-title">Calls per day <span class="muted">last 14 days</span></div><div id="chart" class="chart"></div></div>
+        <div class="card"><div class="card-title">Open action items</div><div id="actionList" class="action-list"></div></div>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="tab" id="tab-settings">
+      <div class="set-grid">
+        <div class="card">
+          <div class="card-title">My style &amp; rules</div>
+          <p class="hint">How you talk, and exactly what the assistant may agree to. Anything not allowed here, it will say you'll confirm.</p>
+          <textarea id="styleRules" rows="18" maxlength="8000" spellcheck="false"></textarea>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="card-title">Voice</div>
+            <select id="voice"></select>
+            <div class="toggle-row">
+              <div><strong>Record calls</strong><small>Stereo WAV (caller left, AI right). The assistant announces recording.</small></div>
+              <label class="switch"><input type="checkbox" id="recording"><span></span></label>
+            </div>
+            <label class="lbl" for="silence">Auto-end after silence (seconds)</label>
+            <input id="silence" type="number" min="5" max="3600">
+            <button class="btn primary" id="saveSettings">Save settings</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Audio devices</div>
+            <div id="devices" class="devices"></div>
+            <p class="hint">Device names come from <code>.env</code>. Run <code>python -m app.devices</code> to list all.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
