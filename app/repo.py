@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import socket
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from psycopg.types.json import Jsonb
@@ -13,6 +14,18 @@ from .db import pool
 # Jobs are tagged with the machine that holds the recording file, so a worker
 # on another machine sharing this database never grabs a job it cannot process.
 HOST = socket.gethostname()
+
+
+def wake_file() -> Path:
+    """Touched after a job is queued so the worker (same host) checks the DB right away instead of polling it."""
+    return get_settings().recordings_dir.parent / "worker.wake"
+
+
+def _wake_worker() -> None:
+    try:
+        wake_file().touch()
+    except OSError:
+        pass  # the worker's hourly fallback poll still picks the job up
 
 DEFAULT_STYLE_RULES = """\
 STYLE
@@ -77,6 +90,7 @@ async def finish_call(call_id: int, *, end_reason: str, recording_path: str | No
         await conn.execute(
             "INSERT INTO jobs (kind, payload) VALUES ('process_call', %s)", (Jsonb({"call_id": call_id, "host": HOST}),)
         )
+    _wake_worker()
 
 
 async def set_recording_path(call_id: int, path: str) -> None:
@@ -317,6 +331,7 @@ async def enqueue_job(kind: str, payload: dict[str, Any]) -> int:
             "INSERT INTO jobs (kind, payload) VALUES (%s,%s) RETURNING id", (kind, Jsonb(payload))
         )).fetchone()
     assert row
+    _wake_worker()
     return int(row["id"])
 
 
@@ -358,6 +373,7 @@ async def requeue_call(call_id: int) -> None:
         await conn.execute("UPDATE calls SET status='queued', error='' WHERE id=%s", (call_id,))
         await conn.execute("INSERT INTO jobs (kind, payload) VALUES ('process_call', %s)",
                            (Jsonb({"call_id": call_id, "host": HOST}),))
+    _wake_worker()
 
 
 # ---------------------------------------------------------------- contacts

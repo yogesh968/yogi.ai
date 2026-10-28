@@ -198,7 +198,13 @@ def test_dashboard_requires_login_and_csrf_header(cloud_app):
 
 def test_unknown_host_is_rejected(cloud_app):
     client, _ = cloud_app
-    assert client.get("/healthz", headers={"host": "evil.example.com"}).status_code == 403
+    assert client.get("/login", headers={"host": "evil.example.com"}).status_code == 403
+    assert client.get("/api/status", headers={"host": "evil.example.com"}).status_code == 403
+
+
+def test_healthz_answers_platform_health_checks(cloud_app):
+    client, _ = cloud_app
+    assert client.get("/healthz", headers={"host": "10.0.0.5"}).status_code == 200
 
 
 def test_login_rate_limit(cloud_app):

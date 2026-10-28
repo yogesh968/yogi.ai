@@ -1,4 +1,4 @@
-"""Async Postgres pool (psycopg 3) tuned for the Supabase pooler."""
+"""Async Postgres pool (psycopg 3); works with the Supabase pooler and Neon."""
 from __future__ import annotations
 
 import asyncio
@@ -46,7 +46,7 @@ def describe_db_error(e: BaseException) -> str:
     return f"Database error: {msg}"
 
 
-async def open_pool(min_size: int = 1, max_size: int = 6) -> AsyncConnectionPool:
+async def open_pool(min_size: int = 0, max_size: int = 6) -> AsyncConnectionPool:
     global _pool
     if _pool is None:
         _pool = AsyncConnectionPool(
@@ -56,7 +56,7 @@ async def open_pool(min_size: int = 1, max_size: int = 6) -> AsyncConnectionPool
             open=False,
             configure=_configure,
             kwargs={"row_factory": dict_row, "autocommit": True, "prepare_threshold": None},
-            max_idle=300,
+            max_idle=120,  # with min_size=0 idle connections close, so a serverless DB (Neon) can scale to zero
             reconnect_timeout=60,
         )
         await _pool.open(wait=True, timeout=20)

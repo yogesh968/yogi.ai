@@ -163,7 +163,7 @@ def _allowed_hosts() -> set[str]:
 @app.middleware("http")
 async def guard(request: Request, call_next):  # type: ignore[no-untyped-def]
     host = (request.headers.get("host") or "").rsplit(":", 1)[0].strip("[]").lower()
-    if host not in _allowed_hosts():  # blocks DNS-rebinding and stray scanners
+    if host not in _allowed_hosts() and request.url.path != "/healthz":  # platform health checks use internal hosts  # blocks DNS-rebinding and stray scanners
         return JSONResponse({"detail": "forbidden host"}, status_code=403)
     path = request.url.path
     if not path.startswith(PUBLIC_PATHS) and not auth.is_authenticated(request.cookies):
@@ -581,7 +581,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     db.use_selector_loop_on_windows()
     config = uvicorn.Config(app, host=s.host, port=s.port, log_level="info", ws_ping_interval=20, loop="none",
-                            proxy_headers=True, forwarded_allow_ips="127.0.0.1")
+                            proxy_headers=True,
+                            # Caddy runs on the same VM; on Render the platform proxy is the only way in.
+                            forwarded_allow_ips="*" if s.behind_platform_proxy else "127.0.0.1")
     server = uvicorn.Server(config)
     print(f"\n  Dashboard: {s.public_base_url or f'http://{s.host}:{s.port}'}\n")
     asyncio.run(server.serve())

@@ -1,6 +1,7 @@
 """Application configuration, loaded from .env (secrets never live in code)."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -69,9 +70,13 @@ class Settings(BaseSettings):
     @field_validator("host")
     @classmethod
     def _loopback_only(cls, v: str) -> str:
-        if v not in ("127.0.0.1", "localhost", "::1"):
-            raise ValueError("HOST must be a loopback address (127.0.0.1); in the cloud, Caddy serves the public side")
+        if v not in ("127.0.0.1", "localhost", "::1", "0.0.0.0"):
+            raise ValueError("HOST must be 127.0.0.1 (behind Caddy) or 0.0.0.0 (behind a platform proxy like Render)")
         return v
+
+    @property
+    def behind_platform_proxy(self) -> bool:
+        return self.host == "0.0.0.0"
 
     @property
     def public_host(self) -> str:
@@ -83,6 +88,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _public_needs_auth(self) -> "Settings":
+        if not self.public_base_url and os.environ.get("RENDER_EXTERNAL_URL"):
+            self.public_base_url = os.environ["RENDER_EXTERNAL_URL"].rstrip("/")  # Render sets this automatically
+        if self.host == "0.0.0.0" and not self.public_base_url:
+            raise ValueError("HOST=0.0.0.0 needs PUBLIC_BASE_URL (so the dashboard login is enforced)")
         if self.public_base_url:
             if not self.public_base_url.startswith("https://"):
                 raise ValueError("PUBLIC_BASE_URL must start with https://")

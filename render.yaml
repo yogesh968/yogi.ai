@@ -1,0 +1,40 @@
+# Render Blueprint: free, always-on hosting without a card (Dashboard -> New -> Blueprint -> this repo).
+# Server + worker run in one free web service. Keep it awake with a free pinger (cron-job.org) on /healthz
+# every 10 minutes: free services sleep after 15 idle minutes and would miss calls while waking up.
+services:
+  - type: web
+    name: yogi-ai
+    runtime: python
+    plan: free
+    region: singapore
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python run.py --no-browser
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: HOST
+        value: 0.0.0.0
+      # PORT and RENDER_EXTERNAL_URL (used as PUBLIC_BASE_URL) are set by Render.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: OWNER_NAME
+        value: Yogesh
+      # Filled in on the Render dashboard (never committed):
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: OWNER_PHONE
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: VOBIZ_WEBHOOK_SECRET
+        sync: false
+      - key: VOBIZ_AUTH_ID
+        sync: false
+      - key: VOBIZ_AUTH_TOKEN
+        sync: false
+      - key: VOBIZ_NUMBER
+        sync: false

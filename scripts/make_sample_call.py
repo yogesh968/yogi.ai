@@ -33,16 +33,24 @@ SCRIPT = [
 
 
 async def tts(client: genai.Client, text: str, voice: str) -> np.ndarray:
-    resp = await client.aio.models.generate_content(
-        model=TTS_MODEL,
-        contents=f"Say naturally, like on a phone call: {text}",
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice))
-            ),
-        ),
-    )
+    for attempt in range(6):
+        try:
+            resp = await client.aio.models.generate_content(
+                model=TTS_MODEL,
+                contents=f"Say naturally, like on a phone call: {text}",
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice))
+                    ),
+                ),
+            )
+            break
+        except genai.errors.ClientError as e:
+            if e.code != 429 or attempt == 5:
+                raise
+            print("  free-tier TTS limit (3/min); waiting 25 s…")  # the per-minute window resets
+            await asyncio.sleep(25)
     data = resp.candidates[0].content.parts[0].inline_data.data  # type: ignore[index,union-attr]
     return np.frombuffer(data, dtype="<i2")
 
@@ -55,7 +63,8 @@ async def main() -> None:
     rate = s.record_sample_rate
     lines = [(spk, text.format(owner=s.owner_name)) for spk, _, text in SCRIPT]
     print("Synthesizing speech…")
-    clips = await asyncio.gather(*(tts(client, text.format(owner=s.owner_name), voice) for _, voice, text in SCRIPT))
+    # One at a time: the free tier allows only 3 TTS requests per minute.
+    clips = [await tts(client, text.format(owner=s.owner_name), voice) for _, voice, text in SCRIPT]
 
     call_id = await repo.create_call(direction="incoming", mode="test", contact_name="Priya", contact_phone="",
                                      purpose="", voice="Puck")

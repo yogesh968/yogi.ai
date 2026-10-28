@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import time
 
 from . import db, repo
 from .migrate import migrate
@@ -11,6 +12,15 @@ from .postcall import process_call
 
 log = logging.getLogger("worker")
 POLL_S = 2.0
+ACTIVE_WINDOW_S = 180   # keep polling the DB this long after any activity (covers the 15 s / 45 s retries)
+IDLE_POLL_S = 3600      # otherwise only on a wake signal, plus this fallback, so a serverless DB (Neon) can sleep
+
+
+def _wake_mtime() -> float:
+    try:
+        return repo.wake_file().stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _is_fatal(e: Exception) -> bool:
@@ -61,13 +71,22 @@ async def main() -> None:
         raise SystemExit(db.describe_db_error(e)) from None
     await migrate()
     log.info("worker started; waiting for jobs")
+    last_active = last_db_poll = time.monotonic()
+    seen_wake = _wake_mtime()
     try:
         while not stop.is_set():
-            try:
-                if await run_once():
-                    continue
-            except Exception:
-                log.exception("worker loop error (database hiccup?); continuing")
+            now = time.monotonic()
+            wake = _wake_mtime()
+            if wake != seen_wake:
+                seen_wake, last_active = wake, now
+            if now - last_active < ACTIVE_WINDOW_S or now - last_db_poll >= IDLE_POLL_S:
+                last_db_poll = now
+                try:
+                    if await run_once():
+                        last_active = time.monotonic()
+                        continue
+                except Exception:
+                    log.exception("worker loop error (database hiccup?); continuing")
             try:
                 await asyncio.wait_for(stop.wait(), timeout=POLL_S)
             except asyncio.TimeoutError:
