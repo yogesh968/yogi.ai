@@ -3,7 +3,7 @@
 An AI that answers the calls you miss on your own mobile number. It talks in your style, records the call with a spoken disclosure, writes a speaker-labelled transcript and summary, and learns facts for next time. It can also place calls for you, and everything lives in a private dashboard you can open from your phone.
 
 ```
-Caller ──► your Airtel number ──(not answered / busy / unreachable)──► forwarded to your Vobiz number
+Caller ──► your Airtel number ──(busy / unreachable)──► forwarded to your Vobiz number
                                                                               │ answer webhook + WebSocket audio
                                                                               ▼
           Oracle Cloud VM (Mumbai) ── Caddy (HTTPS) ── FastAPI server ⇄ Gemini Live (speech-to-speech)
@@ -86,27 +86,30 @@ Open `https://<you>.duckdns.org` on your phone and log in. To update later, comm
 
 ### 8. Forward your Airtel calls to the assistant
 On your Android: **Phone app → ⋮ → Settings → Calls/Supplementary services → Call forwarding → Voice calls**, then set:
-- **Forward when unanswered** → your Vobiz number
 - **Forward when busy** → your Vobiz number
 - **Forward when unreachable** → your Vobiz number
+- **Forward when unanswered** → OFF (so calls you just don't pick up keep ringing normally)
 
 Leave **Always forward** OFF, or your phone never rings.
+
+"Busy" covers: you're already on a call, **or you press Decline/Reject**. So when you can't talk, just reject and the assistant takes it.
+"Unreachable" covers: switched off, no network, airplane mode.
 
 Or dial these codes (they work on Airtel):
 
 | What | Turn on | Turn off |
 |---|---|---|
-| When unanswered (ring time 5–30 s) | `**61*<VOBIZ_NUMBER>**20#` | `##61#` |
+| When unanswered (keep this OFF) | | `##61#` |
 | When busy | `**67*<VOBIZ_NUMBER>#` | `##67#` |
 | When unreachable / switched off | `**62*<VOBIZ_NUMBER>#` | `##62#` |
 | Everything off | | `##002#` |
 
-**Test it:** call your mobile from another phone and don't answer. After the ring time, the assistant picks up and the call appears live in the dashboard.
+**Test it:** call your mobile from another phone and press Reject (or turn on airplane mode). The assistant picks up and the call appears live in the dashboard.
 
 ---
 
 ## Daily use
-- **Incoming:** nothing to do. Missed calls go to the assistant, and you get a summary in History.
+- **Incoming:** nothing to do. Calls go to the assistant when you're busy, reject, or are unreachable, and you get a summary in History.
 - **Outgoing:** Live → "Have the assistant call someone" → number + what to do → **Call now**. The other person sees your Vobiz number, not your mobile.
 - **Contacts:** Memory & contacts → save names for numbers (or click "Save name" on a call). Callers who say their name are saved automatically.
 - **Your rules:** Settings → *My style & rules*. Anything not allowed there, the assistant says you'll confirm.
@@ -128,7 +131,7 @@ Or dial these codes (they work on Airtel):
 |---|---|
 | Forwarded call rings, then "number not reachable" / drops | Check that the Vobiz number is attached to the Voice Application, the Answer URL is exactly right (including the secret), and `https://<domain>/healthz` opens. Check `journalctl -u assistant-server`. |
 | Call connects but silence | Usually the Answer URL returns an error: open `journalctl -u assistant-server`. Make sure Caddy has a certificate (`sudo journalctl -u caddy`): ports 80/443 must be open in **both** the Oracle Security List and the VM (setup script handles the VM). |
-| Phone never forwards | Dial `*#61#` to check the unanswered-forwarding status. Make sure "Always forward" is off. Some numbers need the full `+91` format. |
+| Phone never forwards | Dial `*#67#` (busy) and `*#62#` (unreachable) to check forwarding status. Make sure "Always forward" is off. Some numbers need the full `+91` format. |
 | Caller shows as your own number | Airtel sometimes passes the forwarding party as caller ID. The assistant then asks for the caller's name. Save contacts manually. |
 | `Gemini says the Live model isn't available` | Check LIVE_MODEL against ai.google.dev/gemini-api/docs/models. Run `python -m app.cli check`. |
 | `Gemini free-tier quota/rate limit hit` | Wait a minute. Long busy days may need the paid tier. |

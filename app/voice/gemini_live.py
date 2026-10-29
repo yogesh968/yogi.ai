@@ -99,10 +99,18 @@ class GeminiLiveBrain:
         self._greet_pending = greet_first
         self._connected_once = False
         self.reconnects = 0
+        # Minimal thinking (faster first word) + affective dialog (matches the caller's tone).
+        # Dropped automatically if this model/API version rejects them.
+        self._extras = True
 
     def _config(self) -> types.LiveConnectConfig:
         start, end, silence_ms = self.vad
+        extras: dict = {}
+        if self._extras:
+            extras = {"thinking_config": types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
+                      "enable_affective_dialog": True}
         return types.LiveConnectConfig(
+            **extras,
             response_modalities=[types.Modality.AUDIO],
             system_instruction=self.system_prompt,
             speech_config=types.SpeechConfig(
@@ -118,7 +126,7 @@ class GeminiLiveBrain:
                     disabled=False,
                     start_of_speech_sensitivity=_SENS_START.get(start),
                     end_of_speech_sensitivity=_SENS_END.get(end),
-                    prefix_padding_ms=40,
+                    prefix_padding_ms=20,
                     silence_duration_ms=silence_ms,
                 )
             ),
@@ -146,6 +154,10 @@ class GeminiLiveBrain:
                 raise
             except Exception as e:
                 msg, fatal = friendly_live_error(e)
+                if self._extras and not self._connected_once and "rejected the session config" in msg:
+                    log.info("live model rejected thinking/affective options, retrying without them: %s", e)
+                    self._extras = False
+                    continue
                 failures += 1
                 log.warning("live session error (attempt %d): %s", failures, e)
                 if fatal or (not self._connected_once and failures >= 2) or failures > 6:

@@ -164,15 +164,14 @@ class CallAgent:
     async def _run(self) -> int | None:
         s, t = self.s, self.transport
         self._status("connecting", "Preparing call…")
-        app = await repo.get_app_settings()
-        recording = bool(app["recording_enabled"])
-        voice = str(app["voice"])
-        silence_timeout = int(app["silence_timeout_s"])
-
-        facts, recent = await asyncio.gather(
+        app, facts, recent = await asyncio.gather(  # one round trip instead of two: the caller is waiting
+            repo.get_app_settings(),
             repo.list_facts(self.opts.contact_name, self.opts.contact_phone),
             repo.recent_summaries(self.opts.contact_name, self.opts.contact_phone),
         )
+        recording = bool(app["recording_enabled"])
+        voice = str(app["voice"])
+        silence_timeout = int(app["silence_timeout_s"])
         prompt = build_system_prompt(
             owner_name=s.owner_name, languages=s.caller_languages, timezone=s.timezone,
             style_rules=str(app["style_rules"]), facts=facts, recent=recent,

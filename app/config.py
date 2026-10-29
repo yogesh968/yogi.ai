@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # end "high" + short silence = snappier replies.
     vad_start_sensitivity: Literal["high", "low", "default"] = "low"
     vad_end_sensitivity: Literal["high", "low", "default"] = "high"
-    vad_silence_ms: int = Field(500, ge=100, le=3000)
+    vad_silence_ms: int = Field(350, ge=100, le=3000)
 
     # --- defaults for settings that are editable in the dashboard ---
     default_voice: str = "Puck"

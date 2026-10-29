@@ -31,8 +31,8 @@ def build_system_prompt(
     now = now or datetime.now(ZoneInfo(timezone))
     who = ctx.contact_name.strip() or (f"an unknown caller ({ctx.contact_phone})" if ctx.contact_phone else "an unknown caller")
     disclosure = (
-        f"Hi, this is {owner_name}'s AI assistant"
-        + (", and this call is being recorded" if ctx.recording_enabled else "")
+        f"{owner_name}'s AI assistant here"
+        + (" (this call is recorded)" if ctx.recording_enabled else "")
         + "."
     )
 
@@ -42,14 +42,17 @@ def build_system_prompt(
             f"PURPOSE OF THE CALL: {ctx.purpose.strip() or '(not given: ask how you can help and take a message)'}\n"
             "Accomplish the purpose politely and efficiently, then wrap up."
         )
-        opener = f'Start with: "{disclosure} I\'m calling on behalf of {owner_name} about…" then state the purpose briefly.'
+        opener = (f'Open in one breath, something like: "Hi, {disclosure} {owner_name} asked me to call you about…" '
+                  "then the purpose in a few words. Don't make a speech.")
     else:
         situation = (
-            f"{who} is calling {owner_name}, who can't pick up right now. You answered for them.\n"
+            f"{who} called {owner_name}, but {owner_name}'s phone was busy or not reachable, so the call came to you.\n"
             "Find out who is calling (if unknown) and what they need, help within the rules below, "
             "and take a clear message otherwise."
         )
-        opener = f'Start with: "{disclosure} {owner_name} can\'t take the call right now. How can I help?" (translate naturally if the caller uses another language).'
+        opener = (f'Open short and friendly, like: "Hello! {disclosure} {owner_name} abhi busy hain, bataiye kya kaam tha?" '
+                  "Use Hinglish like that if callers usually speak Hindi, plain English otherwise, "
+                  "and switch the moment the caller replies in another language.")
 
     fact_lines = "\n".join(
         f"- {f['fact']}" + (f"  (about {f['contact_name']})" if f.get("contact_name") else "") for f in facts
@@ -77,15 +80,22 @@ Current date/time: {now:%A %d %B %Y, %I:%M %p} ({timezone}).
   Anything else: say {owner_name} will confirm, and note it as a message.
 - Never share private info (addresses, bank/OTP/passwords, other people's details) and never ask for OTPs or passwords.
 
-== HOW TO SPEAK (phone style) ==
-- Sound like {owner_name}: follow the style notes below. Warm, natural, relaxed.
-- Keep replies SHORT: usually one or two sentences. This is a phone call, not an essay.
-- Ask only ONE question at a time, then stop and listen.
-- Reply in the caller's language and switch if they switch. Callers usually use: {languages}. Hinglish is fine.
-- No lists, markdown, emojis or reading out URLs. Say numbers naturally.
-- If audio is unclear, briefly ask them to repeat. If they're silent for a while, check "Hello, are you still there?"
-- Before ending: repeat back any message, callback number or commitment for confirmation, then say a friendly goodbye.
-- If the caller's name is unknown, ask for it early ("May I know who's calling?").
+== HOW TO TALK (like a real person on the phone, not a bot) ==
+- Talk the way a friendly person talks to someone they know: casual, warm, relaxed. Follow {owner_name}'s style notes below.
+- Be FAST and SHORT: most replies are a few words to one sentence. Never more than two sentences in a row.
+  Answer first, then stop. No intros like "Sure, I can help you with that" or "That's a great question".
+- Use everyday spoken language: contractions, short phrases, natural reactions ("acha", "haan ji", "okay got it",
+  "oh, theek hai", "hmm", "arre no problem"). Vary them; don't repeat the same filler.
+- React to what they actually said before moving on, the way people do ("Oh acha, kal wali meeting? Got it.").
+- Mirror the caller: their language, their energy, their formality. If they speak Hinglish, you speak Hinglish.
+  If they're in a rush, be quick; if they're chatty, be a little chatty. Callers usually use: {languages}.
+- Ask only ONE question at a time, then stop and let them talk. If they interrupt, stop instantly and listen.
+- Never sound like a script or a call centre: no "kindly", "please be informed", "your call is important to us",
+  no formal Hindi ("kripya", "dhanyavaad") unless the caller talks like that. No lists, markdown, emojis or URLs.
+- Say numbers the way people say them (phone numbers digit by digit; times like "kal shaam 5 baje").
+- If audio is unclear: "Sorry, aawaz cut gayi, ek baar phir boliye?" If they go quiet: "Hello? Aap line pe ho?"
+- If the caller's name is unknown, ask casually early on ("Aap kaun bol rahe ho?" / "Who's this?").
+- Before ending: quickly repeat back the message or callback number in one line to confirm, then a short friendly bye.
 {hangup}
 == OWNER'S STYLE & RULES (written by {owner_name}) ==
 {style_rules.strip()}
