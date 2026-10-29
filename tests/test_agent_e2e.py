@@ -45,7 +45,7 @@ class FakeBrain:
         await stop.wait()
 
 
-def test_full_call(monkeypatch, tmp_path):
+def _fake_repo(monkeypatch, tmp_path, brain) -> dict:
     from app import agent as agent_mod, config, repo
     config.get_settings.cache_clear()
     monkeypatch.setenv("RECORDINGS_DIR", str(tmp_path))
@@ -74,7 +74,13 @@ def test_full_call(monkeypatch, tmp_path):
     for name, fn in dict(get_app_settings=get_app_settings, list_facts=none, recent_summaries=none, create_call=create_call,
                          set_recording_path=set_recording_path, insert_segment=insert_segment, finish_call=finish_call).items():
         monkeypatch.setattr(repo, name, fn)
-    monkeypatch.setattr(agent_mod, "GeminiLiveBrain", FakeBrain)
+    monkeypatch.setattr(agent_mod, "GeminiLiveBrain", brain)
+    return db
+
+
+def test_full_call(monkeypatch, tmp_path):
+    from app import config
+    db = _fake_repo(monkeypatch, tmp_path, FakeBrain)
 
     from app.agent import CallAgent, CallOptions
     from app.transports.vobiz import VobizTransport
@@ -116,4 +122,59 @@ def test_full_call(monkeypatch, tmp_path):
         assert w.getnchannels() == 2 and w.getframerate() == 16000
         data = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2").reshape(-1, 2)
     assert np.abs(data[:, 0]).max() > 1000 and np.abs(data[:, 1]).max() > 1000
+    config.get_settings.cache_clear()
+
+
+class GreeterBrain:
+    """Greets the moment Gemini connects, before the phone's media stream exists (early start)."""
+
+    def __init__(self, *, handlers, **kw):
+        self.h = handlers
+        self.reconnects = 0
+
+    async def run(self, audio_in, stop):
+        h = self.h
+        tone = (np.sin(np.arange(2400) / 24000 * 2 * np.pi * 300) * 8000).astype("<i2").tobytes()  # 100 ms @24k
+        h.on_output_text("Hello! Yogesh's AI assistant here.")
+        for _ in range(10):
+            h.on_audio(tone)  # 1 s greeting, generated while the phone audio is still connecting
+        h.on_turn_complete()
+        await asyncio.wait_for(audio_in.get(), 5)  # caller audio arrives once attached
+        h.on_end_call("done")
+        await stop.wait()
+
+
+def test_early_start_plays_pregenerated_greeting_on_attach(monkeypatch, tmp_path):
+    from app import config
+    db = _fake_repo(monkeypatch, tmp_path, GreeterBrain)
+    from app.agent import CallAgent, CallOptions
+    from app.transports.vobiz import VobizTransport
+
+    async def scenario():
+        agent = CallAgent(CallOptions(mode="phone", direction="incoming", provider_call_id="c1"), None)
+        run = asyncio.create_task(agent.run())
+        await asyncio.sleep(0.3)  # Vobiz is still opening the media stream
+        assert agent._preroll and not run.done()
+        ws = FakeVobizSocket()
+        agent.attach(VobizTransport(ws, {"streamId": "s1", "callId": "c1", "mediaFormat": {"encoding": "audio/x-l16", "sampleRate": 16000}}))
+        await asyncio.sleep(0.15)
+        first = [m["event"] for m in ws.sent]
+        await ws.inbox.put(media(np.full(320, 3000, np.int16)))
+        await asyncio.wait_for(run, 10)
+        return first, ws
+
+    first, ws = asyncio.run(scenario())
+    assert first.count("playAudio") >= 5  # greeting starts right away, no waiting for Gemini
+    assert db["finished"]["end_reason"] == "assistant_hung_up"
+    assert [m["event"] for m in ws.sent][-1] == "stop"
+    config.get_settings.cache_clear()
+
+
+def test_early_start_gives_up_without_media_stream(monkeypatch, tmp_path):
+    from app import agent as agent_mod, config
+    db = _fake_repo(monkeypatch, tmp_path, GreeterBrain)
+    monkeypatch.setattr(agent_mod, "ATTACH_TIMEOUT_S", 0.3)
+    from app.agent import CallAgent, CallOptions
+    call_id = asyncio.run(asyncio.wait_for(CallAgent(CallOptions(mode="phone"), None).run(), 5))
+    assert call_id == 42 and db["finished"]["end_reason"] == "no_audio_stream"
     config.get_settings.cache_clear()

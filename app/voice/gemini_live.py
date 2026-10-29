@@ -99,16 +99,16 @@ class GeminiLiveBrain:
         self._greet_pending = greet_first
         self._connected_once = False
         self.reconnects = 0
-        # Minimal thinking (faster first word) + affective dialog (matches the caller's tone).
-        # Dropped automatically if this model/API version rejects them.
+        # No thinking = faster first word (the live model rejects thinking_level but accepts budget 0).
+        # Dropped automatically if the model rejects it. Don't add enable_affective_dialog: setup is
+        # accepted, but the session then dies with 1007 "invalid argument" on the first input.
         self._extras = True
 
     def _config(self) -> types.LiveConnectConfig:
         start, end, silence_ms = self.vad
         extras: dict = {}
         if self._extras:
-            extras = {"thinking_config": types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
-                      "enable_affective_dialog": True}
+            extras = {"thinking_config": types.ThinkingConfig(thinking_budget=0)}
         return types.LiveConnectConfig(
             **extras,
             response_modalities=[types.Modality.AUDIO],
@@ -154,8 +154,8 @@ class GeminiLiveBrain:
                 raise
             except Exception as e:
                 msg, fatal = friendly_live_error(e)
-                if self._extras and not self._connected_once and "rejected the session config" in msg:
-                    log.info("live model rejected thinking/affective options, retrying without them: %s", e)
+                if self._extras and not self._connected_once and fatal:  # e.g. "Thinking level is not supported"
+                    log.info("live model rejected thinking_config, retrying without it: %s", e)
                     self._extras = False
                     continue
                 failures += 1

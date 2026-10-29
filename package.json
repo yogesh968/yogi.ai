@@ -1,0 +1,11 @@
+{
+  "name": "yogi-ai",
+  "private": true,
+  "description": "Shortcuts for the Python app (Windows). The app itself is Python; npm only runs these commands.",
+  "scripts": {
+    "build": ".venv\\Scripts\\python.exe -m pip install -q -r requirements.txt && .venv\\Scripts\\python.exe -m app.migrate",
+    "start": ".venv\\Scripts\\python.exe run.py",
+    "dev": ".venv\\Scripts\\python.exe run.py",
+    "test": ".venv\\Scripts\\python.exe -m pytest -q"
+  }
+}

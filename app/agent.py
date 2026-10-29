@@ -34,6 +34,7 @@ log = logging.getLogger(__name__)
 ONSET_GAP_S = 0.6          # silence needed before a new caller "onset" is registered
 MAX_INPUT_BACKLOG_S = 0.5  # never send Gemini audio older than this
 HANGUP_DRAIN_MAX_S = 10.0  # max wait for the goodbye to finish playing before hanging up
+ATTACH_TIMEOUT_S = 20.0    # early start: max wait for the phone's media stream after the call is answered
 
 
 @dataclass
@@ -47,9 +48,18 @@ class CallOptions:
 
 
 class CallAgent:
-    def __init__(self, opts: CallOptions, transport: AudioTransport, settings: Settings | None = None) -> None:
+    def __init__(self, opts: CallOptions, transport: AudioTransport | None, settings: Settings | None = None,
+                 *, can_hang_up: bool = True) -> None:
+        """`transport=None` = early start: connect Gemini and pre-generate the greeting while the phone
+        line's media stream is still being set up; `attach()` the transport when it arrives."""
         self.opts = opts
         self.transport = transport
+        self.can_hang_up = transport.can_hang_up if transport else can_hang_up
+        self._attached = asyncio.Event()
+        if transport:
+            self._attached.set()
+        self._renderer: SpeechRenderer | None = None
+        self._preroll: list[bytes] = []  # model audio produced before the transport was attached
         self.s = settings or get_settings()
         self.call_id: int | None = None
         self.key = ""  # set by the call manager; tags every dashboard event
@@ -76,6 +86,10 @@ class CallAgent:
         self.interruptions = 0
 
     # ------------------------------------------------------------ public
+    def attach(self, transport: AudioTransport) -> None:
+        self.transport = transport
+        self._attached.set()
+
     def request_stop(self, reason: str = "user") -> None:
         if not self.end_reason:
             self.end_reason = reason
@@ -162,7 +176,7 @@ class CallAgent:
                      "contact_name": self.opts.contact_name, "contact_phone": self.opts.contact_phone})
 
     async def _run(self) -> int | None:
-        s, t = self.s, self.transport
+        s = self.s
         self._status("connecting", "Preparing call…")
         app, facts, recent = await asyncio.gather(  # one round trip instead of two: the caller is waiting
             repo.get_app_settings(),
@@ -176,7 +190,7 @@ class CallAgent:
             owner_name=s.owner_name, languages=s.caller_languages, timezone=s.timezone,
             style_rules=str(app["style_rules"]), facts=facts, recent=recent,
             ctx=CallContext(self.opts.direction, self.opts.contact_name, self.opts.purpose, recording,
-                            contact_phone=self.opts.contact_phone, can_hang_up=t.can_hang_up),
+                            contact_phone=self.opts.contact_phone, can_hang_up=self.can_hang_up),
         )
         self.call_id = await repo.create_call(
             direction=self.opts.direction, mode=self.opts.mode, contact_name=self.opts.contact_name,
@@ -186,24 +200,26 @@ class CallAgent:
         self._status("connecting", "Connecting to Gemini Live…")
         rec_path: Path | None = None
         db_task = asyncio.create_task(self._db_writer(), name="db-writer")
-        renderer: SpeechRenderer = NativeAudioRenderer(t.output_rate, t.playback.push)
         brain: GeminiLiveBrain | None = None
+        tasks: set[asyncio.Task[Any]] = set()
+        t: AudioTransport | None = None
         try:
-            if recording:
-                rec_path = s.recordings_dir / f"call_{self.call_id}_{datetime.now():%Y%m%d_%H%M%S}.wav"
-                self._ai_rec_res = StreamResampler(t.output_rate, s.record_sample_rate, quality="LQ")
-                self.recorder = StereoRecorder(rec_path, s.record_sample_rate)
-                self.recorder.start()
-                await repo.set_recording_path(self.call_id, str(rec_path))
+            def on_audio(pcm: bytes) -> None:
+                if self._renderer is None:
+                    self._preroll.append(pcm)  # greeting generated before the phone audio is connected
+                else:
+                    self._renderer.on_model_audio(pcm)
 
             def on_interrupted() -> None:
-                dropped = t.interrupt()
-                renderer.interrupt()
+                self._preroll.clear()
+                dropped = 0
+                if self.transport is not None and self._renderer is not None:
+                    dropped = round(self.transport.interrupt() * 1000 / self.transport.output_rate)
+                    self._renderer.interrupt()
                 self.interruptions += 1
                 self.assembler.interrupted(self._now_ms())
                 self._last_event = time.monotonic()
-                self._pub({"type": "interrupted", "call_id": self.call_id,
-                             "dropped_ms": round(dropped * 1000 / t.output_rate)})
+                self._pub({"type": "interrupted", "call_id": self.call_id, "dropped_ms": dropped})
 
             def on_input_text(text: str, finished: bool) -> None:
                 self._last_event = time.monotonic()
@@ -211,7 +227,8 @@ class CallAgent:
 
             def on_output_text(text: str) -> None:
                 self._last_event = time.monotonic()
-                renderer.on_model_text(text)
+                if self._renderer is not None:
+                    self._renderer.on_model_text(text)
                 self.assembler.assistant_text(text, self._now_ms())
 
             def on_end_call(reason: str) -> None:
@@ -221,32 +238,57 @@ class CallAgent:
             brain = GeminiLiveBrain(
                 api_key=s.gemini_api_key, model=s.live_model, voice=voice, system_prompt=prompt,
                 handlers=LiveHandlers(
-                    on_audio=renderer.on_model_audio, on_input_text=on_input_text, on_output_text=on_output_text,
+                    on_audio=on_audio, on_input_text=on_input_text, on_output_text=on_output_text,
                     on_interrupted=on_interrupted, on_turn_complete=lambda: self.assembler.turn_complete(self._now_ms()),
                     on_status=lambda st, m: self._status(st, m), transcript_so_far=self.assembler.as_text,
-                    on_end_call=on_end_call if t.can_hang_up else None,
+                    on_end_call=on_end_call if self.can_hang_up else None,
                 ),
                 vad_start=s.vad_start_sensitivity, vad_end=s.vad_end_sensitivity, vad_silence_ms=s.vad_silence_ms,
             )
-            await t.start(self)
-            self._pub({"type": "devices", "call_id": self.call_id, **t.describe()})
-            tasks = {
-                asyncio.create_task(brain.run(self._audio_in, self._stop), name="live-brain"),
-                asyncio.create_task(self._watchdog(silence_timeout), name="watchdog"),
-                asyncio.create_task(t.closed.wait(), name="transport-closed"),
-                asyncio.create_task(self._stop.wait(), name="stop"),
-            }
-            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            if t.closed.is_set() and not self.end_reason:
+            # Gemini connects (and starts generating the greeting) while we wait for the phone audio.
+            brain_task = asyncio.create_task(brain.run(self._audio_in, self._stop), name="live-brain")
+            stop_task = asyncio.create_task(self._stop.wait(), name="stop")
+            tasks = {brain_task, stop_task}
+            if not self._attached.is_set():
+                attach_task = asyncio.create_task(self._attached.wait(), name="attach")
+                await asyncio.wait({attach_task, brain_task, stop_task}, timeout=ATTACH_TIMEOUT_S,
+                                   return_when=asyncio.FIRST_COMPLETED)
+                attach_task.cancel()
+                if not self._attached.is_set():
+                    if not brain_task.done() and not self._stop.is_set():
+                        self.end_reason = self.end_reason or "no_audio_stream"
+                    self._stop.set()
+            if self._attached.is_set() and not self._stop.is_set() and not brain_task.done():
+                t = self.transport
+                assert t is not None
+                if recording:
+                    rec_path = s.recordings_dir / f"call_{self.call_id}_{datetime.now():%Y%m%d_%H%M%S}.wav"
+                    self._ai_rec_res = StreamResampler(t.output_rate, s.record_sample_rate, quality="LQ")
+                    self.recorder = StereoRecorder(rec_path, s.record_sample_rate)
+                    self.recorder.start()
+                renderer: SpeechRenderer = NativeAudioRenderer(t.output_rate, t.playback.push)
+                for pcm in self._preroll:  # play the already-generated greeting immediately
+                    renderer.on_model_audio(pcm)
+                self._preroll.clear()
+                self._renderer = renderer
+                await t.start(self)
+                if rec_path:
+                    await repo.set_recording_path(self.call_id, str(rec_path))
+                self._pub({"type": "devices", "call_id": self.call_id, **t.describe()})
+                tasks |= {
+                    asyncio.create_task(self._watchdog(silence_timeout), name="watchdog"),
+                    asyncio.create_task(t.closed.wait(), name="transport-closed"),
+                }
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            if t is not None and t.closed.is_set() and not self.end_reason:
                 self.end_reason = "caller_hung_up"
             self._stop.set()
             for task in tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            for task in done:
-                if task.get_name() == "live-brain" and not task.cancelled() and task.exception():
-                    raise task.exception()  # type: ignore[misc]
+            if brain_task.done() and not brain_task.cancelled() and brain_task.exception():
+                raise brain_task.exception()  # type: ignore[misc]
         except LiveFatalError as e:
             self.error, self.end_reason = str(e), self.end_reason or "error"
         except asyncio.CancelledError:
@@ -259,12 +301,17 @@ class CallAgent:
             # Always persist whatever we have, even after errors.
             self.state = "ending"
             self._pub({"type": "status", "state": "ending", "message": "Saving call…", "call_id": self.call_id})
-            try:
-                if self.end_reason in ("silence", "user", "error", "assistant_hung_up"):
-                    await asyncio.wait_for(t.hang_up(), timeout=3)
-            except Exception:
-                pass
-            await t.stop()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            t = self.transport
+            if t is not None:
+                try:
+                    if self.end_reason in ("silence", "user", "error", "assistant_hung_up"):
+                        await asyncio.wait_for(t.hang_up(), timeout=3)
+                except Exception:
+                    pass
+                await t.stop()
             self.assembler.close_all(self._now_ms())
             saved = await asyncio.to_thread(self.recorder.finalize) if self.recorder else None
             await self._db_q.put(None)
@@ -284,13 +331,15 @@ class CallAgent:
         """Let the goodbye finish playing, then end the call."""
         deadline = time.monotonic() + HANGUP_DRAIN_MAX_S
         await asyncio.sleep(0.4)  # the model may still be streaming the last words
-        while time.monotonic() < deadline and (self.transport.playback.buffered_ms > 0 or self._ai_playing):
+        while time.monotonic() < deadline and self.transport is not None and (
+                self.transport.playback.buffered_ms > 0 or self._ai_playing):
             await asyncio.sleep(0.1)
         await asyncio.sleep(0.3)
         self.request_stop(reason)
 
     async def _watchdog(self, silence_timeout: int) -> None:
         """Ends the call after `silence_timeout` s with no speech from either side; streams level meters."""
+        assert self.transport is not None
         pb = self.transport.playback
         while not self._stop.is_set():
             await asyncio.sleep(0.2)

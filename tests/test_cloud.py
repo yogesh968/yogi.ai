@@ -143,6 +143,7 @@ def cloud_app(monkeypatch):
         return "Priya" if phone == "+919876543210" else ""
     monkeypatch.setattr(repo, "contact_name_for", fake_name)
     server.manager.pending.clear()
+    monkeypatch.setattr(server.manager, "start_early", lambda opts: "")  # no real Gemini/DB in webhook tests
     from fastapi.testclient import TestClient
     client = TestClient(server.app, base_url="https://me.duckdns.org")
     yield client, server

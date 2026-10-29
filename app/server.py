@@ -50,6 +50,7 @@ class Live:
 class Pending:
     opts: CallOptions
     created: float = field(default_factory=time.monotonic)
+    key: str = ""  # live call already started early (see CallManager.start_early)
 
 
 class CallManager:
@@ -68,12 +69,19 @@ class CallManager:
             for k in [k for k, p in d.items() if now - p.created > PENDING_TTL_S]:
                 d.pop(k, None)
 
-    async def run(self, opts: CallOptions, transport: AudioTransport) -> int | None:
-        """Run a call to completion (used directly by the Vobiz WebSocket handler)."""
+    def _register(self, opts: CallOptions, transport: AudioTransport | None) -> Live:
         key = uuid.uuid4().hex[:12]
         live = Live(key, CallAgent(opts, transport))
         live.agent.key = key
         self.calls[key] = live
+        return live
+
+    async def run(self, opts: CallOptions, transport: AudioTransport) -> int | None:
+        """Run a call to completion (used directly by the Vobiz WebSocket handler)."""
+        return await self._drive(self._register(opts, transport))
+
+    async def _drive(self, live: Live) -> int | None:
+        key = live.key
         try:
             return await live.agent.run()
         except Exception as e:
@@ -88,6 +96,13 @@ class CallManager:
 
     def start_background(self, opts: CallOptions, transport: AudioTransport) -> None:
         asyncio.create_task(self.run(opts, transport), name="call")
+
+    def start_early(self, opts: CallOptions) -> str:
+        """Phone answered: connect Gemini and pre-generate the greeting while the media stream is set up,
+        so the caller hears the assistant right away instead of seconds of silence."""
+        live = self._register(opts, None)
+        live.task = asyncio.create_task(self._drive(live), name="call")
+        return live.key
 
     def find(self, key: str) -> Live | None:
         return self.calls.get(key)
@@ -323,7 +338,7 @@ async def vobiz_answer(secret: str, request: Request) -> Response:
         opts = CallOptions(mode="phone", direction="incoming", contact_name=name, contact_phone=caller,
                            provider_call_id=call_uuid)
         log.info("incoming call %s from %s (forwarded from %s)", call_uuid, caller or "unknown", p.get("ForwardedFrom", "-"))
-    manager.pending[call_uuid] = Pending(opts)
+    manager.pending[call_uuid] = Pending(opts, key=manager.start_early(opts))
     return _xml(stream_xml(vobiz_url("ws", ws=True), vobiz_url("stream-status")))
 
 
@@ -367,6 +382,11 @@ async def vobiz_ws(websocket: WebSocket, secret: str) -> None:
         return
     call_uuid = start.get("callId", "")
     pending = manager.pending.pop(call_uuid, None)
+    live = manager.find(pending.key) if pending and pending.key else None
+    if live and live.task and not live.task.done():
+        live.agent.attach(VobizTransport(websocket, start))
+        await asyncio.shield(live.task)  # keep the socket open until the call is over
+        return
     opts = pending.opts if pending else CallOptions(mode="phone", direction="incoming", provider_call_id=call_uuid)
     await manager.run(opts, VobizTransport(websocket, start))
 
